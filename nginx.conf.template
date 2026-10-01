@@ -1,0 +1,42 @@
+worker_processes auto;
+events { worker_connections 4096; }
+http {
+  access_log off;
+  error_log /dev/stderr warn;
+  sendfile on; tcp_nodelay on; keepalive_timeout 75s;
+  client_max_body_size 0;
+  map $http_upgrade $conn_upgrade { default upgrade; '' close; }
+
+  server {
+    listen __PORT__ default_server;
+    listen [::]:__PORT__ default_server;
+
+    location = /healthz { return 200 "ok"; }
+
+    # ---- 5 proxy inbounds (Railway terminates TLS on 443) ----
+    location = /jx-vless-ws { proxy_pass http://127.0.0.1:10001; include /etc/nginx/ws.inc; }
+    location = /jx-vmess-ws { proxy_pass http://127.0.0.1:10002; include /etc/nginx/ws.inc; }
+    location = /jx-trojan-ws { proxy_pass http://127.0.0.1:10003; include /etc/nginx/ws.inc; }
+    location = /jx-vless-hu { proxy_pass http://127.0.0.1:10004; include /etc/nginx/ws.inc; }
+    location /jx-vless-xh {
+      proxy_pass http://127.0.0.1:10005;
+      proxy_http_version 1.1;
+      proxy_set_header Host $host;
+      proxy_buffering off; proxy_request_buffering off; proxy_cache off;
+      proxy_read_timeout 1h; proxy_send_timeout 1h;
+    }
+
+    # ---- panel / dashboard / api / subscription ----
+    location / {
+      proxy_pass http://127.0.0.1:8000;
+      proxy_http_version 1.1;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto https;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $conn_upgrade;
+      proxy_read_timeout 300s;
+    }
+  }
+}
